@@ -232,7 +232,7 @@ int main() {
 
 			cout << "Current and Target Positions: " << endl;
 			cout << posori_task->_current_position << endl; 
-			cout << target2_position << endl; 
+			cout << chosen_target_position << endl; 
 
 			cout << "Desired Orientation: " << endl;
 			cout << posori_task->_desired_orientation << endl;
