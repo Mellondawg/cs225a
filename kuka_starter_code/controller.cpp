@@ -38,14 +38,41 @@ std::string MASSMATRIX_KEY;
 std::string CORIOLIS_KEY;
 std::string ROBOT_GRAVITY_KEY;
 
+// - optitrack
+std::string OPTITRACK_TIMESTAMP_KEY;
+std::string OPTITRACK_RIGID_BODY_POSITION_KEY;
+std::string OPTITRACK_RIGID_BODY_ORIENTATION_KEY;
+std::string OPTITRACK_SINGLE_MARKER_POSITION_KEY;
+
 unsigned long long controller_counter = 0;
 
 // const bool flag_simulation = false;
 const bool flag_simulation = true;
 
+const bool use_optitrack = false;
+
 const bool inertia_regularization = true;
 
-int main() {
+Vector3d getCalibratedPosition(Vector3d optitrack_target_position, Vector3d optitrack_baseframe_position) {
+	Vector3d robot_calibrated_position = Vector3d::Zero();
+	Vector3d optitrack_relative_position = Vector3d::Zero();
+
+	optitrack_relative_position = (optitrack_target_position - optitrack_baseframe_position);
+
+	// Baseframe will give a translation.
+	double opti_relative_x =  optitrack_relative_position(0);
+	double opti_relative_y =  optitrack_relative_position(1);
+	double opti_relative_z =  optitrack_relative_position(2);
+
+	// Rotate optitrack axes into robot axes.
+
+	robot_calibrated_position << -opti_relative_z, -opti_relative_x, opti_relative_y;
+	return robot_calibrated_position;
+}
+
+int main() {	
+
+	// 1) How do move visual objects from the URDF file.
 
 	/** COMMUNICATION SETUP **/
 
@@ -54,6 +81,11 @@ int main() {
 		JOINT_ANGLES_KEY = "sai2::cs225a::kuka_robot::sensors::q";
 		JOINT_VELOCITIES_KEY = "sai2::cs225a::kuka_robot::sensors::dq";
 		JOINT_TORQUES_COMMANDED_KEY = "sai2::cs225a::kuka_robot::actuators::fgc";
+
+		OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
+		OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
+		OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies";
+		OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers"; // targets are -2 and -3
 	}
 	else
 	{
@@ -64,7 +96,12 @@ int main() {
 		JOINT_TORQUES_SENSED_KEY = "sai2::FrankaPanda::sensors::torques";
 		MASSMATRIX_KEY = "sai2::FrankaPanda::sensors::model::massmatrix";
 		CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
-		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";		
+		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";	
+
+		OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
+		OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
+		OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies";
+		OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers";	
 	}
 
 	// start redis client
@@ -90,6 +127,10 @@ int main() {
 	MatrixXd N_prec = MatrixXd::Identity(dof, dof);
 
 	/** DRONE TASK **/
+
+	// drone optitrack
+	Vector3d optitrack_target_position = Vector3d::Zero();
+	Vector3d optitrack_baseframe_position = Vector3d::Zero();
 
 	// drone position in base frame
 	Vector3d target1_position = Vector3d(3.0, 1.5, 2.0); 
@@ -135,7 +176,7 @@ int main() {
 
 	// set the initial (default) desired position of the joint task
 	VectorXd q_init_desired = initial_q;
-	q_init_desired << 120.0, -30.0, -15.0, 60.0, 30.0, -90.0, 0.0, 0.0;
+	q_init_desired << 120.0, -30.0, -15.0, 60.0, 30.0, -90.0, 0.0;
 	q_init_desired *= M_PI/180.0;
 	joint_task->_desired_position = q_init_desired;
 
@@ -147,6 +188,12 @@ int main() {
 	timer.setLoopFrequency(1000); 
 	double start_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
+
+	// read the values from optitrack.
+	MatrixXd optitrack_rigid_positions = redis_client.getEigenMatrixJSON(OPTITRACK_RIGID_BODY_POSITION_KEY);
+	cout << optitrack_rigid_positions << endl;
+	// optitrack_target_position = optitrack_rigid_positions(0);
+	// optitrack_baseframe_position = optitrack_rigid_positions(1);
 
 	while (runloop) {
 		// wait for next scheduled loop
@@ -190,7 +237,7 @@ int main() {
 			if( (robot->_q - q_init_desired).norm() < 0.05 )
 			{
 				posori_task->reInitializeTask();
-				posori_task->_desired_position = Vector3d(0.0,0.0,1.0);
+				posori_task->_desired_position = Vector3d(0.0,0.0,0.75);
 
 				// TODO: Point in direction of x-axis initially.
 				posori_task->_desired_orientation = AngleAxisd(0.0, Vector3d::UnitX()).toRotationMatrix(); //* posori_task->_desired_orientation;
@@ -211,15 +258,15 @@ int main() {
 			joint_task->updateTaskModel(N_prec);
 
 			// switch between the targets (5 seconds each)
-			Vector3d chosen_target_position; 
-			int periodic_time = int(time) % 15;
-			if (periodic_time % 15 < 5) {
-				chosen_target_position = target1_position;
-			} else if (periodic_time % 15 < 10) {
-				chosen_target_position = target2_position;
-			} else {
-				chosen_target_position = target3_position;
-			}
+			Vector3d chosen_target_position = getCalibratedPosition(optitrack_target_position, optitrack_baseframe_position); 
+			// int periodic_time = int(time) % 15;
+			// if (periodic_time % 15 < 5) {
+			// 	chosen_target_position = target1_position;
+			// } else if (periodic_time % 15 < 10) {
+			// 	chosen_target_position = target2_position;
+			// } else {
+			// 	chosen_target_position = target3_position;
+			// }
 
 			// get the unit direction vector
 			Vector3d direction_vector = (chosen_target_position - posori_task->_current_position);
