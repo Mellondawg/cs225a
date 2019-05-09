@@ -189,11 +189,11 @@ int main() {
 	double start_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
 
-	// read the values from optitrack.
-	MatrixXd optitrack_rigid_positions = redis_client.getEigenMatrixJSON(OPTITRACK_RIGID_BODY_POSITION_KEY);
-	cout << optitrack_rigid_positions << endl;
-	// optitrack_target_position = optitrack_rigid_positions(0);
-	// optitrack_baseframe_position = optitrack_rigid_positions(1);
+	// read the values from optitrack
+	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3);
+	redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
+	optitrack_baseframe_position = optitrack_rigid_positions.row(0);
+	optitrack_target_position = optitrack_rigid_positions.row(1);
 
 	while (runloop) {
 		// wait for next scheduled loop
@@ -203,6 +203,10 @@ int main() {
 		// read robot state from redis
 		robot->_q = redis_client.getEigenMatrixJSON(JOINT_ANGLES_KEY);
 		robot->_dq = redis_client.getEigenMatrixJSON(JOINT_VELOCITIES_KEY);
+		
+		// update the optitrack target position
+		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
+		optitrack_target_position = optitrack_rigid_positions.row(1);
 
 		// update model (simulation or kinematics)
 		if(flag_simulation)
@@ -258,7 +262,8 @@ int main() {
 			joint_task->updateTaskModel(N_prec);
 
 			// switch between the targets (5 seconds each)
-			Vector3d chosen_target_position = getCalibratedPosition(optitrack_target_position, optitrack_baseframe_position); 
+			Vector3d chosen_target_position = Vector3d::Zero();
+			chosen_target_position = getCalibratedPosition(optitrack_target_position, optitrack_baseframe_position); 
 			// int periodic_time = int(time) % 15;
 			// if (periodic_time % 15 < 5) {
 			// 	chosen_target_position = target1_position;
@@ -277,12 +282,12 @@ int main() {
 			qrotation.setFromTwoVectors(Vector3d::UnitZ(), direction_vector);
 			posori_task->_desired_orientation = qrotation.toRotationMatrix();
 
-			cout << "Current and Target Positions: " << endl;
-			cout << posori_task->_current_position << endl; 
-			cout << chosen_target_position << endl; 
+			// cout << "Current and Target Positions: " << endl;
+			// cout << posori_task->_current_position << endl; 
+			// cout << chosen_target_position << endl; 
 
-			cout << "Desired Orientation: " << endl;
-			cout << posori_task->_desired_orientation << endl;
+			// cout << "Desired Orientation: " << endl;
+			// cout << posori_task->_desired_orientation << endl;
 
 			// compute torques
 			posori_task->computeTorques(posori_task_torques);
