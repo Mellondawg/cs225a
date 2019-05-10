@@ -230,7 +230,7 @@ int main() {
 
 	// set the initial (default) desired position of the joint task
 	VectorXd q_init_desired = initial_q;
-	q_init_desired << 120.0, -30.0, -15.0, 60.0, 30.0, -90.0, 0.0;
+	q_init_desired << 70.0, -30.0, -15.0, 60.0, 30.0, -90.0, 0.0;
 	q_init_desired *= M_PI/180.0;
 	joint_task->_desired_position = q_init_desired;
 
@@ -276,9 +276,9 @@ int main() {
 			robot->_M = redis_client.getEigenMatrixJSON(MASSMATRIX_KEY);
 			if(inertia_regularization)
 			{
-				robot->_M(4,4) += 0.07;
-				robot->_M(5,5) += 0.07;
-				robot->_M(6,6) += 0.07;
+				robot->_M(4,4) += 0.15;
+				robot->_M(5,5) += 0.15;
+				robot->_M(6,6) += 0.15;
 			}
 			robot->_M_inv = robot->_M.inverse();
 		}
@@ -342,6 +342,9 @@ int main() {
 		controller_counter++;
 
 	}
+
+	command_torques.setZero();
+	redis_client.setEigenMatrixJSON(JOINT_TORQUES_COMMANDED_KEY, command_torques);
 
 	double end_time = timer.elapsedTime();
     std::cout << "\n";
