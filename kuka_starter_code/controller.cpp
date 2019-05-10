@@ -63,8 +63,8 @@ const bool inertia_regularization = true;
 //------------------------------------------------------------------------------
 
 /**
- * Converts the target and robot base positions (in optitrack frame) into the 
- * target position in the robot frame.
+ * Converts the target position (in optitrack frame) and robot base position (in optitrack frame) 
+ * into the target position in the robot frame.
  */
 Vector3d getTargetRobotPosition(Vector3d target_optitrack_position, 
 								Vector3d baseframe_optitrack_position) {
@@ -83,8 +83,12 @@ Vector3d getTargetRobotPosition(Vector3d target_optitrack_position,
 	return target_robot_position;
 }
 
-Vector3d getPeriodicPosition(double time, // total time
-	 					    int period) { // time on each target
+/**
+ * Retrieves a preset target position (in robot frame) based on the 
+ * cumulative time run and period time. 
+ */
+Vector3d getPeriodicPosition(double time,  // cumulative time
+							 int period) { // time spent on each target
 
 	Vector3d target_robot_position = Vector3d::Zero();
 
@@ -93,9 +97,11 @@ Vector3d getPeriodicPosition(double time, // total time
 	Vector3d target2_position = Vector3d(3.0, 0.0, 1.0); 
 	Vector3d target3_position = Vector3d(3.0, -1.5, 2.0);
 
-	// switch between the 3 targets
+	// set the number of targets and periodic time
 	int num_targets = 3;
 	int periodic_time = int(time) % (num_targets * period);
+
+	// switch between the 3 targets
 	if (periodic_time < period) {
 		target_robot_position = target1_position;
 	} else if (periodic_time < 2 * period) {
@@ -107,8 +113,13 @@ Vector3d getPeriodicPosition(double time, // total time
 	return target_robot_position;
 }
 
-Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target in robot base frame
-							   Vector3d ee_robot_position, 	   // end-effector in robot base frame
+/**
+ * Gets the desired orientation (in robot frame) from the target position (in robot frame)
+ * and the end-effector position (in robot frame) by transforming a direction vector into
+ * an orientation matrix.
+ */
+Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target (in robot frame)
+							   Vector3d ee_robot_position, 	   // end-effector (in robot frame)
 							   bool verbose=false) {   
 
 	Matrix3d desired_orientation = Matrix3d::Identity();
@@ -202,9 +213,9 @@ int main() {
 	//------------------------------------------------------------------------------
 
 	// optitrack frame
-	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
 	Vector3d baseframe_optitrack_position = Vector3d::Zero(); // robot base position (optitrack frame)
-	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3); // only stores 2 for now!
+	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
+	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3); 
 
 	//------------------------------------------------------------------------------
 	// DRONE TASK
@@ -346,7 +357,8 @@ int main() {
 			joint_task->updateTaskModel(N_prec);
 
 			// choose a target position
-			if (use_optitrack) {
+			if (use_optitrack) 
+			{
 				target_robot_position = getTargetRobotPosition(target_optitrack_position, baseframe_optitrack_position); 
 			} else {
 				int period = 2; // how long to spend at a specific target
