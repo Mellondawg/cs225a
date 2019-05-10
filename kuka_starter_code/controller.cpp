@@ -55,11 +55,11 @@ std::string OPTITRACK_SINGLE_MARKER_POSITION_KEY;
 // CONTROLLER SETTINGS 
 //------------------------------------------------------------------------------
 
-unsigned long long controller_counter = 0;
-
 const bool flag_simulation = true;
 const bool use_optitrack = false; // whether to use optitrack values from redis.
 const bool inertia_regularization = true;
+
+unsigned long long controller_counter = 0;
 
 //------------------------------------------------------------------------------
 // HELPER FUNCTIONS
@@ -74,20 +74,21 @@ Vector3d getTargetRobotPosition(Vector3d target_optitrack_position,
 	Vector3d target_robot_position = Vector3d::Zero();
 	Vector3d relative_optitrack_position = Vector3d::Zero();
 
+	// get the vector from the robot base to the target position
 	relative_optitrack_position = (target_optitrack_position - robotbase_optitrack_position);
 
-	// Baseframe will give a translation.
-	double relative_optitrack_x =  relative_optitrack_position(0);
-	double relative_optitrack_y =  relative_optitrack_position(1);
-	double relative_optitrack_z =  relative_optitrack_position(2);
+	// extract the xyz coordinates
+	double relative_optitrack_x = relative_optitrack_position(0);
+	double relative_optitrack_y = relative_optitrack_position(1);
+	double relative_optitrack_z = relative_optitrack_position(2);
 
-	// Rotate optitrack axes into robot axes.
+	// rotate optitrack axes into robot axes.
 	target_robot_position << -relative_optitrack_z, -relative_optitrack_x, relative_optitrack_y;
 	return target_robot_position;
 }
 
 /**
- * Retrieves a preset target position (in robot frame) based on the 
+ * Retrieves a preset target position (robot frame) based on the 
  * cumulative time run and period time. 
  */
 Vector3d getPeriodicPosition(double time,  // cumulative time
@@ -117,12 +118,12 @@ Vector3d getPeriodicPosition(double time,  // cumulative time
 }
 
 /**
- * Gets the desired orientation (in robot frame) from the target position (in robot frame)
- * and the end-effector position (in robot frame) by transforming a direction vector into
+ * Gets the desired orientation (robot frame) from the target position (robot frame)
+ * and the end-effector position (robot frame) by transforming a direction vector into
  * an orientation matrix.
  */
-Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target position (in robot frame)
-							   Vector3d ee_robot_position,     // end-effector position (in robot frame)
+Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target position (robot frame)
+							   Vector3d ee_robot_position,     // end-effector position (robot frame)
 							   bool verbose=false) {   
 
 	Matrix3d desired_orientation = Matrix3d::Identity();
@@ -165,27 +166,23 @@ int main() {
 		JOINT_VELOCITIES_KEY = "sai2::cs225a::kuka_robot::sensors::dq";
 		JOINT_TORQUES_COMMANDED_KEY = "sai2::cs225a::kuka_robot::actuators::fgc";
 
-		OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
-		OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
-		OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies";
-		OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers"; // targets are -2 and -3
 	}
 	else
 	{
-		JOINT_TORQUES_COMMANDED_KEY = "sai2::FrankaPanda::actuators::fgc";
-
 		JOINT_ANGLES_KEY  = "sai2::FrankaPanda::sensors::q";
 		JOINT_VELOCITIES_KEY = "sai2::FrankaPanda::sensors::dq";
+		JOINT_TORQUES_COMMANDED_KEY = "sai2::FrankaPanda::actuators::fgc";
 		JOINT_TORQUES_SENSED_KEY = "sai2::FrankaPanda::sensors::torques";
+		
 		MASSMATRIX_KEY = "sai2::FrankaPanda::sensors::model::massmatrix";
 		CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
 		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity"; 
-
-		OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
-		OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
-		OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies";
-		OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers"; // targets are -2 and -3
 	}
+	
+	OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
+	OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
+	OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies";
+	OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers"; // targets are -2 and -3
 
 	// start redis client
 	auto redis_client = RedisClient();
