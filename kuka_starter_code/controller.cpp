@@ -6,6 +6,7 @@
 #include "redis/RedisClient.h"
 #include "timer/LoopTimer.h"
 #include "Sai2Primitives.h"
+#include "chai3d.h"
 
 #include <iostream>
 #include <string>
@@ -25,7 +26,10 @@ const string robot_file = "./resources/kuka_iiwa.urdf";
 
 int state = JOINT_CONTROLLER;
 
-// redis keys:
+//------------------------------------------------------------------------------
+// REDIS KEYS
+//------------------------------------------------------------------------------
+
 // - read:
 std::string JOINT_ANGLES_KEY;
 std::string JOINT_VELOCITIES_KEY;
@@ -46,11 +50,17 @@ std::string OPTITRACK_SINGLE_MARKER_POSITION_KEY;
 
 unsigned long long controller_counter = 0;
 
-/** CONTROLLER SETTINGS **/
+//------------------------------------------------------------------------------
+// CONTROLLER SETTINGS 
+//------------------------------------------------------------------------------
 
 const bool flag_simulation = true;
 const bool use_optitrack = false; // whether to use optitrack values from redis.
 const bool inertia_regularization = true;
+
+//------------------------------------------------------------------------------
+// HELPER FUNCTIONS
+//------------------------------------------------------------------------------
 
 /**
  * Converts the target and robot base positions (in optitrack frame) into the 
@@ -125,9 +135,15 @@ Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target in robo
 	return desired_orientation;
 }
 
+//------------------------------------------------------------------------------
+// MAIN
+//------------------------------------------------------------------------------
+
 int main() {	
 
-	/** COMMUNICATION SETUP **/
+	//------------------------------------------------------------------------------
+	// COMMUNICATION SETUP
+	//------------------------------------------------------------------------------
 
 	if(flag_simulation)
 	{
@@ -166,7 +182,9 @@ int main() {
 	signal(SIGTERM, &sighandler);
 	signal(SIGINT, &sighandler);
 
-	/** ROBOT CONTROLLER SETUP **/
+	//------------------------------------------------------------------------------
+	// ROBOT CONTROLLER SETUP
+	//------------------------------------------------------------------------------
 
 	// load robots
 	auto robot = new Sai2Model::Sai2Model(robot_file, false);
@@ -179,19 +197,25 @@ int main() {
 	VectorXd command_torques = VectorXd::Zero(dof);
 	MatrixXd N_prec = MatrixXd::Identity(dof, dof);
 
-	/** OPTITRAK TASK **/
+	//------------------------------------------------------------------------------
+	// OPTITRAK TASK
+	//------------------------------------------------------------------------------
 
 	// optitrack frame
 	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
 	Vector3d baseframe_optitrack_position = Vector3d::Zero(); // robot base position (optitrack frame)
 	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3); // only stores 2 for now!
 
-	/** DRONE TASK **/
+	//------------------------------------------------------------------------------
+	// DRONE TASK
+	//------------------------------------------------------------------------------
 
 	// drone (robot frame)
 	Vector3d target_robot_position = Vector3d::Zero();
 
-	/** POSE TASK **/
+	//------------------------------------------------------------------------------
+	// POSE TASK
+	//------------------------------------------------------------------------------
 
 	// pose task
 	const string control_link = "link6";
@@ -212,9 +236,10 @@ int main() {
 	posori_task->_kp_ori = 200.0;
 	posori_task->_kv_ori = 20.0;
 
-	/** JOINT TASK **/
+	//------------------------------------------------------------------------------
+	// JOINT TASK
+	//------------------------------------------------------------------------------
 
-	// joint task
 	auto joint_task = new Sai2Primitives::JointTask(robot);
 
 #ifdef USING_OTG
@@ -234,7 +259,9 @@ int main() {
 	q_init_desired *= M_PI/180.0;
 	joint_task->_desired_position = q_init_desired;
 
-	/** CONTROLLER LOOP **/
+	//------------------------------------------------------------------------------
+	// CONTROL LOOP
+	//------------------------------------------------------------------------------
 
 	// create a timer
 	LoopTimer timer;
