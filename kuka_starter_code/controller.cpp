@@ -56,7 +56,7 @@ std::string OPTITRACK_SINGLE_MARKER_POSITION_KEY;
 //------------------------------------------------------------------------------
 
 const bool flag_simulation = true;
-const bool use_optitrack = false; // whether to use optitrack values from redis.
+const bool use_optitrack = true; // whether to use optitrack values from redis.
 const bool inertia_regularization = true;
 
 unsigned long long controller_counter = 0;
@@ -165,7 +165,6 @@ int main() {
 		JOINT_ANGLES_KEY = "sai2::cs225a::kuka_robot::sensors::q";
 		JOINT_VELOCITIES_KEY = "sai2::cs225a::kuka_robot::sensors::dq";
 		JOINT_TORQUES_COMMANDED_KEY = "sai2::cs225a::kuka_robot::actuators::fgc";
-
 	}
 	else
 	{
@@ -285,7 +284,7 @@ int main() {
 
 	if (use_optitrack) {
 		// read the robot base position from the optitrack
-		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
+		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY, optitrack_rigid_positions);
 		robotbase_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_ROBOTBASE_INDEX);
 	}
 
@@ -300,7 +299,7 @@ int main() {
 		
 		if (use_optitrack) {
 			// update the target position from the optitrack
-			redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
+			redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY, optitrack_rigid_positions);
 			target_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_TARGET_INDEX);
 		}
 
