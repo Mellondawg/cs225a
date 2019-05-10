@@ -46,33 +46,86 @@ std::string OPTITRACK_SINGLE_MARKER_POSITION_KEY;
 
 unsigned long long controller_counter = 0;
 
-// const bool flag_simulation = false;
+/** CONTROLLER SETTINGS **/
+
 const bool flag_simulation = true;
-
-const bool use_optitrack = false;
-
+const bool use_optitrack = false; // whether to use optitrack values from redis.
 const bool inertia_regularization = true;
 
-Vector3d getCalibratedPosition(Vector3d optitrack_target_position, Vector3d optitrack_baseframe_position) {
-	Vector3d robot_calibrated_position = Vector3d::Zero();
-	Vector3d optitrack_relative_position = Vector3d::Zero();
+/**
+ * Converts the target and robot base positions (in optitrack frame) into the 
+ * target position in the robot frame.
+ */
+Vector3d getTargetRobotPosition(Vector3d target_optitrack_position, 
+								Vector3d baseframe_optitrack_position) {
+	Vector3d target_robot_position = Vector3d::Zero();
+	Vector3d relative_optitrack_position = Vector3d::Zero();
 
-	optitrack_relative_position = (optitrack_target_position - optitrack_baseframe_position);
+	relative_optitrack_position = (target_optitrack_position - baseframe_optitrack_position);
 
 	// Baseframe will give a translation.
-	double opti_relative_x =  optitrack_relative_position(0);
-	double opti_relative_y =  optitrack_relative_position(1);
-	double opti_relative_z =  optitrack_relative_position(2);
+	double relative_optitrack_x =  relative_optitrack_position(0);
+	double relative_optitrack_y =  relative_optitrack_position(1);
+	double relative_optitrack_z =  relative_optitrack_position(2);
 
 	// Rotate optitrack axes into robot axes.
+	target_robot_position << -relative_optitrack_z, -relative_optitrack_x, relative_optitrack_y;
+	return target_robot_position;
+}
 
-	robot_calibrated_position << -opti_relative_z, -opti_relative_x, opti_relative_y;
-	return robot_calibrated_position;
+Vector3d getPeriodicPosition(double time, // total time
+	 					    int period) { // time on each target
+
+	Vector3d target_robot_position = Vector3d::Zero();
+
+	// drone position in base frame
+	Vector3d target1_position = Vector3d(3.0, 1.5, 2.0); 
+	Vector3d target2_position = Vector3d(3.0, 0.0, 1.0); 
+	Vector3d target3_position = Vector3d(3.0, -1.5, 2.0);
+
+	// switch between the 3 targets
+	int num_targets = 3;
+	int periodic_time = int(time) % (num_targets * period);
+	if (periodic_time < period) {
+		target_robot_position = target1_position;
+	} else if (periodic_time < 2 * period) {
+		target_robot_position = target2_position;
+	} else {
+		target_robot_position = target3_position;
+	}
+
+	return target_robot_position;
+}
+
+Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target in robot base frame
+							   Vector3d ee_robot_position, 	   // end-effector in robot base frame
+							   bool verbose=false) {   
+
+	Matrix3d desired_orientation = Matrix3d::Identity();
+
+	// get the unit direction vector
+	Vector3d direction_vector = (target_robot_position - ee_robot_position);
+	direction_vector.normalize();
+
+	// set the desired orientation matrix			
+	Quaterniond qrotation;
+	qrotation.setFromTwoVectors(Vector3d::UnitZ(), direction_vector);
+	desired_orientation = qrotation.toRotationMatrix();
+
+	// debugging statements
+	if (verbose) {
+		cout << "Current and Target Positions: " << endl;
+		cout << ee_robot_position << endl; 
+		cout << target_robot_position << endl; 
+
+		cout << "Desired Orientation: " << endl;
+		cout << desired_orientation << endl;
+	}
+	
+	return desired_orientation;
 }
 
 int main() {	
-
-	// 1) How do move visual objects from the URDF file.
 
 	/** COMMUNICATION SETUP **/
 
@@ -101,7 +154,7 @@ int main() {
 		OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
 		OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
 		OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies";
-		OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers";	
+		OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers"; // targets are -2 and -3
 	}
 
 	// start redis client
@@ -126,16 +179,17 @@ int main() {
 	VectorXd command_torques = VectorXd::Zero(dof);
 	MatrixXd N_prec = MatrixXd::Identity(dof, dof);
 
+	/** OPTITRAK TASK **/
+
+	// optitrack frame
+	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
+	Vector3d baseframe_optitrack_position = Vector3d::Zero(); // robot base position (optitrack frame)
+	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3); // only stores 2 for now!
+
 	/** DRONE TASK **/
 
-	// drone optitrack
-	Vector3d optitrack_target_position = Vector3d::Zero();
-	Vector3d optitrack_baseframe_position = Vector3d::Zero();
-
-	// drone position in base frame
-	Vector3d target1_position = Vector3d(3.0, 1.5, 2.0); 
-	Vector3d target2_position = Vector3d(3.0, 0.0, 1.0); 
-	Vector3d target3_position = Vector3d(3.0, -1.5, 2.0);
+	// drone (robot frame)
+	Vector3d target_robot_position = Vector3d::Zero();
 
 	/** POSE TASK **/
 
@@ -189,11 +243,12 @@ int main() {
 	double start_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
 
-	// read the values from optitrack
-	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3);
-	redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
-	optitrack_baseframe_position = optitrack_rigid_positions.row(0);
-	optitrack_target_position = optitrack_rigid_positions.row(1);
+	if (use_optitrack) {
+		// read the robot base position and target position from optitrack
+		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
+		baseframe_optitrack_position = optitrack_rigid_positions.row(0); // first rigid position
+		target_optitrack_position = optitrack_rigid_positions.row(1); // second rigid position
+	}
 
 	while (runloop) {
 		// wait for next scheduled loop
@@ -204,9 +259,11 @@ int main() {
 		robot->_q = redis_client.getEigenMatrixJSON(JOINT_ANGLES_KEY);
 		robot->_dq = redis_client.getEigenMatrixJSON(JOINT_VELOCITIES_KEY);
 		
-		// update the optitrack target position
-		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
-		optitrack_target_position = optitrack_rigid_positions.row(1);
+		if (use_optitrack) {
+			// update the optitrack target position
+			redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
+			target_optitrack_position = optitrack_rigid_positions.row(1); // second rigid position
+		}
 
 		// update model (simulation or kinematics)
 		if(flag_simulation)
@@ -261,33 +318,16 @@ int main() {
 			N_prec = posori_task->_N;
 			joint_task->updateTaskModel(N_prec);
 
-			// switch between the targets (5 seconds each)
-			Vector3d chosen_target_position = Vector3d::Zero();
-			chosen_target_position = getCalibratedPosition(optitrack_target_position, optitrack_baseframe_position); 
-			// int periodic_time = int(time) % 15;
-			// if (periodic_time % 15 < 5) {
-			// 	chosen_target_position = target1_position;
-			// } else if (periodic_time % 15 < 10) {
-			// 	chosen_target_position = target2_position;
-			// } else {
-			// 	chosen_target_position = target3_position;
-			// }
+			// choose a target position
+			if (use_optitrack) {
+				target_robot_position = getTargetRobotPosition(target_optitrack_position, baseframe_optitrack_position); 
+			} else {
+				int period = 2; // how long to spend at a specific target
+				target_robot_position = getPeriodicPosition(time, period);
+			}
 
-			// get the unit direction vector
-			Vector3d direction_vector = (chosen_target_position - posori_task->_current_position);
-			direction_vector.normalize();
-
-			// set the desired orientation matrix			
-			Quaterniond qrotation;
-			qrotation.setFromTwoVectors(Vector3d::UnitZ(), direction_vector);
-			posori_task->_desired_orientation = qrotation.toRotationMatrix();
-
-			// cout << "Current and Target Positions: " << endl;
-			// cout << posori_task->_current_position << endl; 
-			// cout << chosen_target_position << endl; 
-
-			// cout << "Desired Orientation: " << endl;
-			// cout << posori_task->_desired_orientation << endl;
+			// set the desired orientation of the pose task
+			posori_task->_desired_orientation = getDesiredOrientation(target_robot_position, posori_task->_current_position);
 
 			// compute torques
 			posori_task->computeTorques(posori_task_torques);
