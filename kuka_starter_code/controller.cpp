@@ -21,8 +21,11 @@ using namespace Eigen;
 
 const string robot_file = "./resources/kuka_iiwa.urdf";
 
-#define JOINT_CONTROLLER      0
-#define POSORI_CONTROLLER     1
+#define JOINT_CONTROLLER              0
+#define POSORI_CONTROLLER             1
+
+#define OPTITRACK_RIGIDBODY_ROBOTBASE_INDEX       0    // index for the robot base rigid body 
+#define OPTITRACK_RIGIDBODY_TARGET_INDEX          1    // index for the target rigid body 
 
 int state = JOINT_CONTROLLER;
 
@@ -48,11 +51,11 @@ std::string OPTITRACK_RIGID_BODY_POSITION_KEY;
 std::string OPTITRACK_RIGID_BODY_ORIENTATION_KEY;
 std::string OPTITRACK_SINGLE_MARKER_POSITION_KEY;
 
-unsigned long long controller_counter = 0;
-
 //------------------------------------------------------------------------------
 // CONTROLLER SETTINGS 
 //------------------------------------------------------------------------------
+
+unsigned long long controller_counter = 0;
 
 const bool flag_simulation = true;
 const bool use_optitrack = false; // whether to use optitrack values from redis.
@@ -63,15 +66,15 @@ const bool inertia_regularization = true;
 //------------------------------------------------------------------------------
 
 /**
- * Converts the target position (in optitrack frame) and robot base position (in optitrack frame) 
- * into the target position in the robot frame.
+ * Gets the target position (in the robot frame) from the target position (in optitrack frame) 
+ * and robot base position (in optitrack frame).
  */
 Vector3d getTargetRobotPosition(Vector3d target_optitrack_position, 
-								Vector3d baseframe_optitrack_position) {
+								Vector3d robotbase_optitrack_position) {
 	Vector3d target_robot_position = Vector3d::Zero();
 	Vector3d relative_optitrack_position = Vector3d::Zero();
 
-	relative_optitrack_position = (target_optitrack_position - baseframe_optitrack_position);
+	relative_optitrack_position = (target_optitrack_position - robotbase_optitrack_position);
 
 	// Baseframe will give a translation.
 	double relative_optitrack_x =  relative_optitrack_position(0);
@@ -118,8 +121,8 @@ Vector3d getPeriodicPosition(double time,  // cumulative time
  * and the end-effector position (in robot frame) by transforming a direction vector into
  * an orientation matrix.
  */
-Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target (in robot frame)
-							   Vector3d ee_robot_position, 	   // end-effector (in robot frame)
+Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target position (in robot frame)
+							   Vector3d ee_robot_position,     // end-effector position (in robot frame)
 							   bool verbose=false) {   
 
 	Matrix3d desired_orientation = Matrix3d::Identity();
@@ -128,7 +131,7 @@ Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target (in rob
 	Vector3d direction_vector = (target_robot_position - ee_robot_position);
 	direction_vector.normalize();
 
-	// set the desired orientation matrix			
+	// set the desired orientation matrix           
 	Quaterniond qrotation;
 	qrotation.setFromTwoVectors(Vector3d::UnitZ(), direction_vector);
 	desired_orientation = qrotation.toRotationMatrix();
@@ -150,7 +153,7 @@ Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target (in rob
 // MAIN
 //------------------------------------------------------------------------------
 
-int main() {	
+int main() {    
 
 	//------------------------------------------------------------------------------
 	// COMMUNICATION SETUP
@@ -176,7 +179,7 @@ int main() {
 		JOINT_TORQUES_SENSED_KEY = "sai2::FrankaPanda::sensors::torques";
 		MASSMATRIX_KEY = "sai2::FrankaPanda::sensors::model::massmatrix";
 		CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
-		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";	
+		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity"; 
 
 		OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
 		OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
@@ -212,10 +215,12 @@ int main() {
 	// OPTITRAK TASK
 	//------------------------------------------------------------------------------
 
-	// optitrack frame
-	Vector3d baseframe_optitrack_position = Vector3d::Zero(); // robot base position (optitrack frame)
-	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
+	// raw optitrack data
 	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3); 
+
+	// optitrack positions
+	Vector3d robotbase_optitrack_position = Vector3d::Zero(); // robot base position (optitrack frame)
+	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
 
 	//------------------------------------------------------------------------------
 	// DRONE TASK
@@ -282,10 +287,9 @@ int main() {
 	bool fTimerDidSleep = true;
 
 	if (use_optitrack) {
-		// read the robot base position and target position from optitrack
+		// read the robot base position from the optitrack
 		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
-		baseframe_optitrack_position = optitrack_rigid_positions.row(0); // first rigid position
-		target_optitrack_position = optitrack_rigid_positions.row(1); // second rigid position
+		robotbase_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_ROBOTBASE_INDEX);
 	}
 
 	while (runloop) {
@@ -298,9 +302,9 @@ int main() {
 		robot->_dq = redis_client.getEigenMatrixJSON(JOINT_VELOCITIES_KEY);
 		
 		if (use_optitrack) {
-			// update the optitrack target position
+			// update the target position from the optitrack
 			redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY,optitrack_rigid_positions);
-			target_optitrack_position = optitrack_rigid_positions.row(1); // second rigid position
+			target_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_TARGET_INDEX);
 		}
 
 		// update model (simulation or kinematics)
@@ -357,9 +361,8 @@ int main() {
 			joint_task->updateTaskModel(N_prec);
 
 			// choose a target position
-			if (use_optitrack) 
-			{
-				target_robot_position = getTargetRobotPosition(target_optitrack_position, baseframe_optitrack_position); 
+			if (use_optitrack) {
+				target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
 			} else {
 				int period = 2; // how long to spend at a specific target
 				target_robot_position = getPeriodicPosition(time, period);
@@ -386,10 +389,10 @@ int main() {
 	redis_client.setEigenMatrixJSON(JOINT_TORQUES_COMMANDED_KEY, command_torques);
 
 	double end_time = timer.elapsedTime();
-    std::cout << "\n";
-    std::cout << "Controller Loop run time  : " << end_time << " seconds\n";
-    std::cout << "Controller Loop updates   : " << timer.elapsedCycles() << "\n";
-    std::cout << "Controller Loop frequency : " << timer.elapsedCycles()/end_time << "Hz\n";
+	std::cout << "\n";
+	std::cout << "Controller Loop run time  : " << end_time << " seconds\n";
+	std::cout << "Controller Loop updates   : " << timer.elapsedCycles() << "\n";
+	std::cout << "Controller Loop frequency : " << timer.elapsedCycles()/end_time << "Hz\n";
 
 
 	return 0;
