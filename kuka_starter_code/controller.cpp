@@ -88,36 +88,6 @@ Vector3d getTargetRobotPosition(Vector3d target_optitrack_position,
 }
 
 /**
- * Retrieves a preset target position (robot frame) based on the 
- * cumulative time run and period time. 
- */
-Vector3d getPeriodicPosition(double time,  // cumulative time
-							 int period) { // time spent on each target
-
-	Vector3d target_robot_position = Vector3d::Zero();
-
-	// drone position in base frame
-	Vector3d target1_position = Vector3d(3.0, 1.5, 2.0); 
-	Vector3d target2_position = Vector3d(3.0, 0.0, 1.0); 
-	Vector3d target3_position = Vector3d(3.0, -1.5, 2.0);
-
-	// set the number of targets and periodic time
-	int num_targets = 3;
-	int periodic_time = int(time) % (num_targets * period);
-
-	// switch between the 3 targets
-	if (periodic_time < period) {
-		target_robot_position = target1_position;
-	} else if (periodic_time < 2 * period) {
-		target_robot_position = target2_position;
-	} else {
-		target_robot_position = target3_position;
-	}
-
-	return target_robot_position;
-}
-
-/**
  * Gets the desired orientation (robot frame) from the target position (robot frame)
  * and the end-effector position (robot frame) by transforming a direction vector into
  * an orientation matrix.
@@ -357,12 +327,7 @@ int main() {
 			joint_task->updateTaskModel(N_prec);
 
 			// choose a target position
-			if (use_optitrack) {
-				target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
-			} else {
-				int period = 2; // how long to spend at a specific target
-				target_robot_position = getPeriodicPosition(time, period);
-			}
+			target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
 
 			// set the desired orientation of the pose task
 			posori_task->_desired_orientation = getDesiredOrientation(target_robot_position, posori_task->_current_position);
