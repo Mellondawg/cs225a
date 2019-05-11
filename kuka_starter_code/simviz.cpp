@@ -23,18 +23,24 @@ const string robot_file = "./resources/kuka_iiwa.urdf";
 const string robot_name = "KUKA_IIWA";
 const string camera_name = "camera_fixed";
 
+#define OPTITRACK_RIGIDBODY_ROBOTBASE_INDEX       0    // index for the robot base rigid body 
+#define OPTITRACK_RIGIDBODY_TARGET_INDEX          1    // index for the target rigid body 
+
 // redis keys:
 // - write:
 const std::string JOINT_ANGLES_KEY = "sai2::cs225a::kuka_robot::sensors::q";
 const std::string JOINT_VELOCITIES_KEY = "sai2::cs225a::kuka_robot::sensors::dq";
 // - read
 const std::string TORQUES_COMMANDED_KEY = "sai2::cs225a::kuka_robot::actuators::fgc";
-const std::string TARGET_ROBOT_POSITION_KEY = "sai2::cs225a::kuka_robot::target::position";
+const std::string OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies";
 
 RedisClient redis_client;
 
 // simulation function prototype
 void simulation(Sai2Model::Sai2Model* robot, chai3d::cShapeSphere* target_sphere, Simulation::Sai2Simulation* sim);
+
+// convert between optitrack and robot frames
+Vector3d getTargetRobotPosition(Vector3d target_optitrack_position, Vector3d robotbase_optitrack_position);
 
 // callback to print glfw errors
 void glfwError(int error, const char* description);
@@ -235,7 +241,12 @@ void simulation(Sai2Model::Sai2Model* robot, chai3d::cShapeSphere* target_sphere
 	VectorXd command_torques = VectorXd::Zero(dof);
 	redis_client.setEigenMatrixJSON(TORQUES_COMMANDED_KEY, command_torques);
 
-	// target position from the optitrack simulation
+	// optitrack position data
+	MatrixXd optitrack_rigid_positions = MatrixXd::Zero(2,3); 
+	Vector3d robotbase_optitrack_position = Vector3d::Zero(); // robot base position (optitrack frame)
+	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
+
+	// target position (robot frame) from the optitrack simulation
 	Vector3d target_robot_position = Vector3d::Zero();
 
 	// create a timer
@@ -254,7 +265,10 @@ void simulation(Sai2Model::Sai2Model* robot, chai3d::cShapeSphere* target_sphere
 		command_torques = redis_client.getEigenMatrixJSON(TORQUES_COMMANDED_KEY);
 
 		// set the target robot position from redis
-		target_robot_position = redis_client.getEigenMatrixString(TARGET_ROBOT_POSITION_KEY);
+		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY, optitrack_rigid_positions);
+		robotbase_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_ROBOTBASE_INDEX);
+		target_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_TARGET_INDEX);
+		target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
 		target_sphere->setLocalPos(target_robot_position);
 
 		// set torques to simulation
@@ -285,6 +299,30 @@ void simulation(Sai2Model::Sai2Model* robot, chai3d::cShapeSphere* target_sphere
 	std::cout << "Simulation Loop run time  : " << end_time << " seconds\n";
 	std::cout << "Simulation Loop updates   : " << timer.elapsedCycles() << "\n";
 	std::cout << "Simulation Loop frequency : " << timer.elapsedCycles()/end_time << "Hz\n";
+}
+
+//------------------------------------------------------------------------------
+
+/**
+ * Gets the target position (in the robot frame) from the target position (in optitrack frame) 
+ * and robot base position (in optitrack frame).
+ */
+Vector3d getTargetRobotPosition(Vector3d target_optitrack_position, 
+								Vector3d robotbase_optitrack_position) {
+	Vector3d target_robot_position = Vector3d::Zero();
+	Vector3d relative_optitrack_position = Vector3d::Zero();
+
+	// get the vector from the robot base to the target position
+	relative_optitrack_position = (target_optitrack_position - robotbase_optitrack_position);
+
+	// extract the xyz coordinates
+	double relative_optitrack_x = relative_optitrack_position(0);
+	double relative_optitrack_y = relative_optitrack_position(1);
+	double relative_optitrack_z = relative_optitrack_position(2);
+
+	// rotate optitrack axes into robot axes.
+	target_robot_position << -relative_optitrack_z, -relative_optitrack_x, relative_optitrack_y;
+	return target_robot_position;
 }
 
 //------------------------------------------------------------------------------

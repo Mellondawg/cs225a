@@ -18,8 +18,7 @@ OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies"
 OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies"
 OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers" # targets are -2 and -3
 
-TARGET_ROBOT_POSITION_KEY = "sai2::cs225a::kuka_robot::target::position"
-JOINT_ANGLES_KEY = "sai2::cs225a::kuka_robot::sensors::q"
+# TARGET_ROBOT_POSITION_KEY = "sai2::cs225a::kuka_robot::target::position"
 
 #######################################################
 # Stored Values
@@ -146,10 +145,10 @@ while True:
 
 	# Set the VALUE of the rigid body KEY.
 	redis_client.set(OPTITRACK_RIGID_BODY_POSITION_KEY, rigid_body_position_value)
-	redis_client.set(TARGET_ROBOT_POSITION_KEY, target_robot_position_value)
+	# redis_client.set(TARGET_ROBOT_POSITION_KEY, target_robot_position_value) # not necessary
 
 	print("="*10 + " Simulated Optitrack Redis Values " + "="*10)
-	print("Simluation Settings: {Preset Flight=%s, Time Multipler=%s}" % (args.preset_flight, time_multiplier))
+	print("Simulation Settings: {Preset Flight=%s, Time Multipler=%s}" % (args.preset_flight, time_multiplier))
 	print("Rigid Body Positions (Optitrack Frame): ", rigid_body_position_value)
 	print("Target Position (Robot Frame): ", target_robot_position_value)
 

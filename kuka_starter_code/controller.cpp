@@ -64,7 +64,6 @@ unsigned long long controller_counter = 0;
 //------------------------------------------------------------------------------
 // HELPER FUNCTIONS
 //------------------------------------------------------------------------------
-
 /**
  * Gets the target position (in the robot frame) from the target position (in optitrack frame) 
  * and robot base position (in optitrack frame).
@@ -86,6 +85,7 @@ Vector3d getTargetRobotPosition(Vector3d target_optitrack_position,
 	target_robot_position << -relative_optitrack_z, -relative_optitrack_x, relative_optitrack_y;
 	return target_robot_position;
 }
+
 
 /**
  * Gets the desired orientation (robot frame) from the target position (robot frame)
