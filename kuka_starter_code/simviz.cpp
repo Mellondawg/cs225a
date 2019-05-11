@@ -16,6 +16,7 @@ void sighandler(int){fSimulationRunning = false;}
 
 using namespace std;
 using namespace Eigen;
+using namespace chai3d;
 
 const string world_file = "./resources/world.urdf";
 const string robot_file = "./resources/kuka_iiwa.urdf";
@@ -28,11 +29,12 @@ const std::string JOINT_ANGLES_KEY = "sai2::cs225a::kuka_robot::sensors::q";
 const std::string JOINT_VELOCITIES_KEY = "sai2::cs225a::kuka_robot::sensors::dq";
 // - read
 const std::string TORQUES_COMMANDED_KEY = "sai2::cs225a::kuka_robot::actuators::fgc";
+const std::string TARGET_ROBOT_POSITION_KEY = "sai2::cs225a::kuka_robot::target::position";
 
 RedisClient redis_client;
 
 // simulation function prototype
-void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim);
+void simulation(Sai2Model::Sai2Model* robot, chai3d::cShapeSphere* target_sphere, Simulation::Sai2Simulation* sim);
 
 // callback to print glfw errors
 void glfwError(int error, const char* description);
@@ -78,6 +80,18 @@ int main() {
 	sim->setCollisionRestitution(0);
 	sim->setCoeffFrictionStatic(0.6);
 
+	// add a dynamic sphere primitives (for visually indicating the moving target)
+	auto target_sphere = new cShapeSphere(0.10);
+	cWorld* cworld = graphics->_world;
+	cworld->addChild(target_sphere);
+
+	// set position of the target
+	Vector3d target_robot_initial_position = Vector3d::Zero();
+    target_sphere->setLocalPos(target_robot_initial_position);  // position
+
+    // set properties of target sphere
+    target_sphere->m_material->setOrangeLightSalmon();  // material color
+
 	// read joint positions, velocities, update model
 	sim->getJointPositions(robot_name, robot->_q);
 	sim->getJointVelocities(robot_name, robot->_dq);
@@ -118,7 +132,7 @@ int main() {
 	double last_cursorx, last_cursory;
 
 	fSimulationRunning = true;
-	thread sim_thread(simulation, robot, sim);
+	thread sim_thread(simulation, robot, target_sphere, sim);
 	
 	// while window is open:
 	while (fSimulationRunning)
@@ -215,11 +229,14 @@ int main() {
 }
 
 //------------------------------------------------------------------------------
-void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
+void simulation(Sai2Model::Sai2Model* robot, chai3d::cShapeSphere* target_sphere, Simulation::Sai2Simulation* sim) {
 
 	int dof = robot->dof();
 	VectorXd command_torques = VectorXd::Zero(dof);
 	redis_client.setEigenMatrixJSON(TORQUES_COMMANDED_KEY, command_torques);
+
+	// target position from the optitrack simulation
+	Vector3d target_robot_position = Vector3d::Zero();
 
 	// create a timer
 	LoopTimer timer;
@@ -235,6 +252,10 @@ void simulation(Sai2Model::Sai2Model* robot, Simulation::Sai2Simulation* sim) {
 
 		// read arm torques from redis
 		command_torques = redis_client.getEigenMatrixJSON(TORQUES_COMMANDED_KEY);
+
+		// set the target robot position from redis
+		target_robot_position = redis_client.getEigenMatrixString(TARGET_ROBOT_POSITION_KEY);
+		target_sphere->setLocalPos(target_robot_position);
 
 		// set torques to simulation
 		sim->setJointTorques(robot_name, command_torques);

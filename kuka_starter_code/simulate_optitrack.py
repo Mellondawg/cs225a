@@ -16,6 +16,7 @@ OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies"
 OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies"
 OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers" # targets are -2 and -3
 
+TARGET_ROBOT_POSITION_KEY = "sai2::cs225a::kuka_robot::target::position"
 JOINT_ANGLES_KEY = "sai2::cs225a::kuka_robot::sensors::q"
 
 #######################################################
@@ -61,7 +62,7 @@ def get_optitrack_position(robot_position):
 def figure_eight_trajectory(t):
 	target_robot_position = [3.0, 2.0 * math.cos(t), 1.0 + 1.0 * math.cos(t) * math.sin(t)] # in robot frame
 	target_optitrack_position = get_optitrack_position(target_robot_position) # in opti frame
-	return target_optitrack_position
+	return target_optitrack_position, target_robot_position
 
 
 #######################################################
@@ -83,18 +84,24 @@ while True:
 	t = 0.001 * niter
 	
 	# Get the target and robotbase positions.
-	target_optitrack_position = figure_eight_trajectory(t)
+	target_optitrack_position, target_robot_position = figure_eight_trajectory(t)
 	robotbase_optitrack_position = [0.0, 0.0, 0.0] # set optitrack and robot origins to be the same.
 
 	# Convert to strings.
 	robotbase_position_string =  " ".join(format(x, ".3f") for x in robotbase_optitrack_position)
-	target_position_string = " ".join(format(x, ".3f") for x in target_optitrack_position)
+	target_optitrack_position_string = " ".join(format(x, ".3f") for x in target_optitrack_position)
+	target_robot_position_string = " ".join(format(x, ".3f") for x in target_robot_position)
+
+	# Build the redis strings.
+	rigid_body_position_value = robotbase_position_string + "; " + target_optitrack_position_string
+	target_robot_position_value = target_robot_position_string
 
 	# Set the VALUE of the rigid body KEY.
-	rigid_body_position_value = robotbase_position_string + "; " + target_position_string
 	redis_client.set(OPTITRACK_RIGID_BODY_POSITION_KEY, rigid_body_position_value)
+	redis_client.set(TARGET_ROBOT_POSITION_KEY, target_robot_position_value)
 
-	print("Optitrack Rigid Body Positions: ", rigid_body_position_value)
+	print("Rigid Body Positions (Optitrack Frame): ", rigid_body_position_value)
+	print("Target Position (Robot Frame): ", target_robot_position_value)
 
 	# Each iteration is ~1 milliseconds.
 	niter += 1
