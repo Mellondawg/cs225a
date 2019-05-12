@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <string>
+#include <cmath>
 
 #include <signal.h>
 bool runloop = true;
@@ -62,8 +63,9 @@ const bool inertia_regularization = true;
 unsigned long long controller_counter = 0;
 
 //------------------------------------------------------------------------------
-// HELPER FUNCTIONS
+// TARGETING FUNCTIONS
 //------------------------------------------------------------------------------
+
 /**
  * Gets the target position (in the robot frame) from the target position (in optitrack frame) 
  * and robot base position (in optitrack frame).
@@ -86,6 +88,46 @@ Vector3d getTargetRobotPosition(Vector3d target_optitrack_position,
 	return target_robot_position;
 }
 
+/**
+ * Gets an estimate of the target velocity from the current and previous positions and 
+ * change in time, i.e. dx = (x_{t} - x_{t-1}) / dt
+ */
+Vector3d estimateTargetRobotVelocity(Vector3d current_target_position, 
+									 Vector3d previous_target_position,
+									 double dt) {
+	Vector3d estimate_target_velocity = Vector3d::Zero();
+	if (dt != 0.0) {
+		estimate_target_velocity = (current_target_position - previous_target_position) / dt;
+	}
+	return estimate_target_velocity;
+}
+
+/**
+ * Gets an estimate of the target velocity from the current and previous positions and 
+ * change in time, i.e. dx = (x_{t} - x_{t-1}) / dt
+ */
+Vector3d estimateTargetRobotAcceleration(Vector3d current_target_velocity, 
+									 	 Vector3d previous_target_velocity,
+									 	 double dt) {
+	Vector3d estimate_target_acceleration = Vector3d::Zero();
+	if (dt != 0.0) {
+		estimate_target_acceleration = (current_target_velocity - previous_target_velocity) / dt;
+	}
+	return estimate_target_acceleration;
+}
+
+/**
+ * Predicts the future position of the target position, 
+ * i.e. x = x_prev + (dx * dt)
+ */
+Vector3d predictedTargetRobotPosition(Vector3d current_position, 
+									  Vector3d estimate_velocity, 
+									  Vector3d estimate_acceleration,
+									  double dt) {
+	Vector3d predicted_target_position = Vector3d::Zero();
+	predicted_target_position = current_position + estimate_velocity * dt + (0.5) * estimate_acceleration * pow(dt, 2); 
+	return predicted_target_position;
+}
 
 /**
  * Gets the desired orientation (robot frame) from the target position (robot frame)
@@ -145,7 +187,7 @@ int main() {
 		
 		MASSMATRIX_KEY = "sai2::FrankaPanda::sensors::model::massmatrix";
 		CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
-		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity"; 
+		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";
 	}
 	
 	OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
@@ -194,6 +236,7 @@ int main() {
 
 	// drone (robot frame)
 	Vector3d target_robot_position = Vector3d::Zero();
+	Vector3d target_robot_velocity = Vector3d::Zero();
 
 	//------------------------------------------------------------------------------
 	// POSE TASK
@@ -252,10 +295,19 @@ int main() {
 	double start_time = timer.elapsedTime(); //secs
 	bool fTimerDidSleep = true;
 
+	// store times read from optitrack
+	double optitrack_time = 0.0; 	  //secs
+	double optitrack_prev_time = 0.0; //secs
+
 	if (use_optitrack) {
 		// read the robot base position from the optitrack
 		redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY, optitrack_rigid_positions);
 		robotbase_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_ROBOTBASE_INDEX);
+
+		// read the timestamp from the optitrack
+		string optitrack_timestamp_string = redis_client.get(OPTITRACK_TIMESTAMP_KEY);
+		// TODO: Convert Optitrack timestamp (string) to seconds (double).
+		optitrack_time = optitrack_prev_time = std::stod(optitrack_timestamp_string);
 	}
 
 	while (runloop) {
@@ -271,6 +323,10 @@ int main() {
 			// update the target position from the optitrack
 			redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY, optitrack_rigid_positions);
 			target_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_TARGET_INDEX);
+
+			string optitrack_timestamp_string = redis_client.get(OPTITRACK_TIMESTAMP_KEY);
+			// TODO: Convert Optitrack timestamp (string) to seconds (double).
+			optitrack_time = std::stod(optitrack_timestamp_string);
 		}
 
 		// update model (simulation or kinematics)
@@ -327,10 +383,31 @@ int main() {
 			joint_task->updateTaskModel(N_prec);
 
 			// choose a target position
-			target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
+			Vector3d current_target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
+			double delta_time = optitrack_time - optitrack_prev_time;
 
-			// set the desired orientation of the pose task
-			posori_task->_desired_orientation = getDesiredOrientation(target_robot_position, posori_task->_current_position);
+			// only update if the time has changed
+			if ( delta_time != 0.0 ) {
+
+				// get the estimated velocity and acceleration from position and time data.
+				Vector3d estimate_target_robot_velocity = estimateTargetRobotVelocity(current_target_robot_position, target_robot_position, delta_time);
+				Vector3d estimate_target_robot_acceleration = estimateTargetRobotAcceleration(estimate_target_robot_velocity, target_robot_velocity, delta_time);
+				// cout << estimate_target_robot_velocity.norm() << endl;
+
+				// predict target position in a timestep
+				Vector3d predicted_target_robot_position = predictedTargetRobotPosition(current_target_robot_position, estimate_target_robot_velocity, estimate_target_robot_acceleration, delta_time);
+
+				// set the desired orientation of the pose task
+				Vector3d ee_robot_position = posori_task->_current_position;
+				posori_task->_desired_orientation = getDesiredOrientation(predicted_target_robot_position, ee_robot_position);
+
+				// update target position and (estimated) velocity
+				target_robot_position = current_target_robot_position;
+				target_robot_velocity = estimate_target_robot_velocity;
+				
+				// update the time
+				optitrack_prev_time = optitrack_time;
+			} 
 
 			// compute torques
 			posori_task->computeTorques(posori_task_torques);
@@ -339,11 +416,11 @@ int main() {
 			command_torques = posori_task_torques + joint_task_torques;
 		}
 
-		// send to redis
+		// send torques to redis.
 		redis_client.setEigenMatrixJSON(JOINT_TORQUES_COMMANDED_KEY, command_torques);
 
+		// update control loop counter
 		controller_counter++;
-
 	}
 
 	command_torques.setZero();

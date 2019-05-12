@@ -29,7 +29,7 @@ OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers" # t
 parser = argparse.ArgumentParser(description='Simulate Optitrack Values in Redis.')
 
 parser.add_argument('-p', '--preset-flight', type=str, default='figure_eight',
-                    help='Choice of flight preset for the target (figure_eight, triangle_periodic). Default=figure_eight')
+                    help='Choice of flight preset for the target (figure_eight, circle, triangle_periodic). Default=figure_eight')
 parser.add_argument('-t', '--time-multiplier', type=float, default=0.0005,
                     help='Multiplier applied to the time of the target speed. Default=0.0005')
 parser.add_argument('-d', '--disable-simulator', action='store_true',
@@ -85,6 +85,12 @@ def figure_eight_trajectory(t):
 	target_optitrack_position = robot_to_optitrack_position(target_robot_position) # in opti frame
 	return target_optitrack_position, target_robot_position
 
+def circle_trajectory(t, radius=0.6):
+	""" Draws a circle. """ 
+	target_robot_position = [3.0, radius * math.cos(t), 1.25 + radius * math.sin(t)] # in robot frame
+	target_optitrack_position = robot_to_optitrack_position(target_robot_position) # in opti frame
+	return target_optitrack_position, target_robot_position
+
 def triangle_periodic_trajectory(t, period=2):
 	""" Switches between the three targets. """
 	first_target_position = [3.0, 1.5, 2.0]
@@ -126,7 +132,7 @@ def parse_redis_rigid_body_matrix(rigid_body_position_value):
 # Reader / Simulator Modes
 #######################################################
 
-def simulate_optitrack_redis(redis_client, niter):
+def simulate_optitrack_redis(redis_client, niter, current_time):
 	""" Simulate optitrack values and write to redis. """
 	t = time_multiplier * niter
 
@@ -137,23 +143,26 @@ def simulate_optitrack_redis(redis_client, niter):
 	# Convert to strings.
 	robotbase_position_string =  " ".join(format(x, ".3f") for x in robotbase_optitrack_position)
 	target_optitrack_position_string = " ".join(format(x, ".3f") for x in target_optitrack_position)
-	target_robot_position_string = " ".join(format(x, ".3f") for x in target_robot_position)
+	# target_robot_position_string = " ".join(format(x, ".3f") for x in target_robot_position)
 
 	# Build the redis strings.
 	rigid_body_position_value = robotbase_position_string + "; " + target_optitrack_position_string
-	target_robot_position_value = target_robot_position_string
+	# target_robot_position_value = target_robot_position_string
+	timestamp_value = "%.6f" % current_time
 
 	# Set the VALUE of the rigid body KEY.
 	redis_client.set(OPTITRACK_RIGID_BODY_POSITION_KEY, rigid_body_position_value)
-	# redis_client.set(TARGET_ROBOT_POSITION_KEY, target_robot_position_value) # not necessary
+	redis_client.set(OPTITRACK_TIMESTAMP_KEY, timestamp_value)
 
-	return rigid_body_position_value, target_robot_position_value
+	return rigid_body_position_value #, target_robot_position_value
 
 def read_optitrack_redis(redis_client):
 	""" Log the settings and read optitrack values from redis. """
 	rigid_body_position_value = redis_client.get(OPTITRACK_RIGID_BODY_POSITION_KEY)
+	timestamp_value = redis_client.get(OPTITRACK_TIMESTAMP_KEY)
+	
 	robotbase_optitrack_position, target_optitrack_position, target_robot_position = parse_redis_rigid_body_matrix(rigid_body_position_value)
-	# target_robot_position_value = redis_client.get(TARGET_ROBOT_POSITION_KEY)
+	timestamp = float(timestamp_value)
 
 	print("="*10 + " Reading Optitrack Redis Values " + "="*10)
 	if mode == SIMULATOR_MODE:
@@ -162,6 +171,7 @@ def read_optitrack_redis(redis_client):
 	print(" - Robotbase Position (Optitrack Frame): %s" % robotbase_optitrack_position)
 	print(" - Target Position (Optitrack Frame):    %s" % target_optitrack_position)
 	print(" - Target Position (Robot Frame):        %s" % target_robot_position)
+	print("Timestamp (in seconds):          	 %s" % timestamp)
 
 #######################################################
 # Apply the Argument Settings
@@ -171,6 +181,8 @@ def read_optitrack_redis(redis_client):
 target_trajectory_fn = figure_eight_trajectory
 if args.preset_flight == "figure_eight":
 	target_trajectory_fn = figure_eight_trajectory
+elif args.preset_flight == "circle":
+	target_trajectory_fn = circle_trajectory
 else: # args.preset_flight == "triangle_periodic":
 	target_trajectory_fn = triangle_periodic_trajectory
 
@@ -195,7 +207,7 @@ while True:
 
 	# Either write and read (simulator) or just read from redis.
 	if mode == SIMULATOR_MODE:
-		simulate_optitrack_redis(redis_client, niter)
+		simulate_optitrack_redis(redis_client, niter, current_time)
 		read_optitrack_redis(redis_client)
 	else: # mode = READER_MODE
 		read_optitrack_redis(redis_client)
