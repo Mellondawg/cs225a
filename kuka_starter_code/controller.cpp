@@ -386,7 +386,7 @@ int main() {
 			Vector3d current_target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
 			double delta_time = optitrack_time - optitrack_prev_time;
 
-			// only update if the time has changed
+			// only update if the optitrack time has changed
 			if ( delta_time != 0.0 ) {
 
 				// get the estimated velocity and acceleration from position and time data.
