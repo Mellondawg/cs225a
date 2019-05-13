@@ -52,6 +52,8 @@ std::string OPTITRACK_RIGID_BODY_POSITION_KEY;
 std::string OPTITRACK_RIGID_BODY_ORIENTATION_KEY;
 std::string OPTITRACK_SINGLE_MARKER_POSITION_KEY;
 
+std::string CONTROLLER_RUNING_KEY;
+
 //------------------------------------------------------------------------------
 // CONTROLLER SETTINGS 
 //------------------------------------------------------------------------------
@@ -195,6 +197,8 @@ int main() {
 	OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies";
 	OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers"; // targets are -2 and -3
 
+	CONTROLLER_RUNING_KEY = "sai2::cs225a::controller_running";
+
 	// start redis client
 	auto redis_client = RedisClient();
 	redis_client.connect();
@@ -248,11 +252,10 @@ int main() {
 	auto posori_task = new Sai2Primitives::PosOriTask(robot, control_link, control_point);
 
 	// use online trjaectory generation
-#ifdef USING_OTG
-	posori_task->_use_interpolation_flag = true;
-#else
+	posori_task->_use_interpolation_flag = false;
+
 	posori_task->_use_velocity_saturation_flag = true;
-#endif
+	posori_task->_angular_saturation_velocity = M_PI; 		// pi radians in one second.
 	
 	// set the gains on the pose task
 	VectorXd posori_task_torques = VectorXd::Zero(dof);
@@ -267,11 +270,8 @@ int main() {
 
 	auto joint_task = new Sai2Primitives::JointTask(robot);
 
-#ifdef USING_OTG
 	joint_task->_use_interpolation_flag = true;
-#else
-	joint_task->_use_velocity_saturation_flag = true;
-#endif
+	// joint_task->_use_velocity_saturation_flag = true;
 
 	// set the gains on the joint task
 	VectorXd joint_task_torques = VectorXd::Zero(dof);
@@ -280,7 +280,7 @@ int main() {
 
 	// set the initial (default) desired position of the joint task
 	VectorXd q_init_desired = initial_q;
-	q_init_desired << 70.0, -30.0, -15.0, 60.0, 30.0, -90.0, 0.0;
+	q_init_desired << 90.0, -90.0, 0.0, -90.0, 0.0, 0.0, 0.0;
 	q_init_desired *= M_PI/180.0;
 	joint_task->_desired_position = q_init_desired;
 
@@ -310,6 +310,7 @@ int main() {
 		optitrack_time = optitrack_prev_time = std::stod(optitrack_timestamp_string);
 	}
 
+	redis_client.set(CONTROLLER_RUNING_KEY, "0");
 	while (runloop) {
 		// wait for next scheduled loop
 		timer.waitForNextLoop();
@@ -359,13 +360,15 @@ int main() {
 			command_torques = joint_task_torques;
 
 			// check whether actual joint position is close to desired joint position
-			if( (robot->_q - q_init_desired).norm() < 0.05 )
+			//if( (robot->_q - q_init_desired).norm() < 0.05 )
+			string running_string = redis_client.get(CONTROLLER_RUNING_KEY);
+			if ( running_string == "1" )
 			{
 				posori_task->reInitializeTask();
-				posori_task->_desired_position = Vector3d(0.0,0.0,0.75);
+				// posori_task->_desired_position = Vector3d(0.0,0.0,0.75);
 
 				// TODO: Point in direction of x-axis initially.
-				posori_task->_desired_orientation = AngleAxisd(0.0, Vector3d::UnitX()).toRotationMatrix(); //* posori_task->_desired_orientation;
+				// posori_task->_desired_orientation = AngleAxisd(0.0, Vector3d::UnitX()).toRotationMatrix(); //* posori_task->_desired_orientation;
 
 				joint_task->reInitializeTask();
 				joint_task->_kp = 0;
@@ -414,6 +417,28 @@ int main() {
 			joint_task->computeTorques(joint_task_torques);
 
 			command_torques = posori_task_torques + joint_task_torques;
+		}
+
+		// send to redis
+		// command_torques << 170, 170, 170, -170, -50, -100, -110;
+		// robot->_q  << 180.0/180.0*M_PI, 140.0/180.0*M_PI, -170.0/180.0*M_PI, 100.0/180.0*M_PI, 165.0/180.0*M_PI, 120.0/180.0*M_PI, -180.0/180.0*M_PI;
+		const double torque_limit[7] = {165, 165, 100, 100, 100, 35, 35}; // LBR iiwa 7 R800
+		const double joint_limit[7] = {165.0/180.0*M_PI, 115.0/180.0*M_PI, 165.0/180.0*M_PI, 115.0/180.0*M_PI, 165.0/180.0*M_PI, 119.0/180.0*M_PI, 173.0/180.0*M_PI};
+
+		for (int i = 0; i < 7; i++) {
+			double torque_i = command_torques(i);
+			if (abs(torque_i) > torque_limit[i]) {
+				cout << "Joint: " << i << endl;
+				cout << "Torque (Actual): " << torque_i << endl;
+				cout << "Torque (Limit): " << torque_limit[i] << endl;
+			}
+
+			double robot_qi = robot->_q(i);
+			if (abs(robot_qi) > joint_limit[i]) {
+				cout << "Joint: " << i << endl;
+				cout << "Angle (Actual): " << robot_qi << endl;
+				cout << "Angle (Limit): " << joint_limit[i] << endl;	
+			}
 		}
 
 		// send torques to redis.
