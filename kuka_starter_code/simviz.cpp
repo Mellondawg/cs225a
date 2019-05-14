@@ -394,4 +394,3 @@ void mouseClick(GLFWwindow* window, int button, int action, int mods) {
 			break;
 	}
 }
-

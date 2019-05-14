@@ -223,6 +223,10 @@ int main() {
 	VectorXd command_torques = VectorXd::Zero(dof);
 	MatrixXd N_prec = MatrixXd::Identity(dof, dof);
 
+	// joint and torque limits
+	const double torque_limit[7] = {165, 165, 100, 100, 100, 35, 35}; // LBR iiwa 7 R800
+	const double joint_limit[7] = {165.0/180.0*M_PI, 115.0/180.0*M_PI, 165.0/180.0*M_PI, 115.0/180.0*M_PI, 165.0/180.0*M_PI, 119.0/180.0*M_PI, 173.0/180.0*M_PI};
+
 	//------------------------------------------------------------------------------
 	// OPTITRAK TASK
 	//------------------------------------------------------------------------------
@@ -252,9 +256,11 @@ int main() {
 	auto posori_task = new Sai2Primitives::PosOriTask(robot, control_link, control_point);
 
 	// use online trjaectory generation
+#ifdef USING_OTG
 	posori_task->_use_interpolation_flag = false;
-
-	posori_task->_use_velocity_saturation_flag = true;
+#else
+	posori_task->_use_velocity_saturation_flag = false;
+#endif
 	posori_task->_angular_saturation_velocity = M_PI; 		// pi radians in one second.
 	
 	// set the gains on the pose task
@@ -270,8 +276,11 @@ int main() {
 
 	auto joint_task = new Sai2Primitives::JointTask(robot);
 
+#ifdef USING_OTG
 	joint_task->_use_interpolation_flag = true;
-	// joint_task->_use_velocity_saturation_flag = true;
+#else
+	joint_task->_use_velocity_saturation_flag = true;
+#endif
 
 	// set the gains on the joint task
 	VectorXd joint_task_torques = VectorXd::Zero(dof);
@@ -419,25 +428,22 @@ int main() {
 			command_torques = posori_task_torques + joint_task_torques;
 		}
 
-		// send to redis
+		// detect joint and torque limits
 		// command_torques << 170, 170, 170, -170, -50, -100, -110;
 		// robot->_q  << 180.0/180.0*M_PI, 140.0/180.0*M_PI, -170.0/180.0*M_PI, 100.0/180.0*M_PI, 165.0/180.0*M_PI, 120.0/180.0*M_PI, -180.0/180.0*M_PI;
-		const double torque_limit[7] = {165, 165, 100, 100, 100, 35, 35}; // LBR iiwa 7 R800
-		const double joint_limit[7] = {165.0/180.0*M_PI, 115.0/180.0*M_PI, 165.0/180.0*M_PI, 115.0/180.0*M_PI, 165.0/180.0*M_PI, 119.0/180.0*M_PI, 173.0/180.0*M_PI};
-
 		for (int i = 0; i < 7; i++) {
 			double torque_i = command_torques(i);
 			if (abs(torque_i) > torque_limit[i]) {
-				cout << "Joint: " << i << endl;
-				cout << "Torque (Actual): " << torque_i << endl;
-				cout << "Torque (Limit): " << torque_limit[i] << endl;
+				cout << "[WARNING] Joint: " << i << endl;
+				cout << "[WARNING] Torque (Actual): " << torque_i << endl;
+				cout << "[WARNING] Torque (Limit): " << torque_limit[i] << endl;
 			}
 
 			double robot_qi = robot->_q(i);
 			if (abs(robot_qi) > joint_limit[i]) {
-				cout << "Joint: " << i << endl;
-				cout << "Angle (Actual): " << robot_qi << endl;
-				cout << "Angle (Limit): " << joint_limit[i] << endl;	
+				cout << "[ERROR] Joint: " << i << endl;
+				cout << "[ERROR] Angle (Actual): " << robot_qi << endl;
+				cout << "[ERROR] Angle (Limit): " << joint_limit[i] << endl;	
 			}
 		}
 

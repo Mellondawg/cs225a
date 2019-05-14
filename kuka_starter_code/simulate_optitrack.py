@@ -20,6 +20,7 @@ OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp"
 OPTITRACK_RIGID_BODY_POSITION_KEY = "sai2::optitrack::pos_rigid_bodies"
 OPTITRACK_RIGID_BODY_ORIENTATION_KEY = "sai2::optitrack::ori_rigid_bodies"
 OPTITRACK_SINGLE_MARKER_POSITION_KEY = "sai2::optitrack::pos_single_markers" # targets are -2 and -3
+CONTROLLER_RUNING_KEY = "sai2::cs225a::controller_running"
 
 #######################################################
 # Parse Arguments
@@ -213,6 +214,7 @@ start_time = time.time()
 niter = 0
 
 redis_client = redis.Redis(decode_responses=True)
+redis_client.set(CONTROLLER_RUNING_KEY, "1")
 while True:
 	# Get the current time.
 	current_time = time.time() - start_time # time in seconds
