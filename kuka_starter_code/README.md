@@ -1,11 +1,12 @@
 # Simulate Optitrack Values in Redis
 
-Simulate and Log Optitrack Values in Redis.
+Python script to Simulate and Log Optitrack Values in Redis.
 
 ### Quickstart
+0. Run `cmake .. && make` in `/build` 
 1. Run `./bin/simviz`
 2. Run `./bin/controller`
-3. Run `kuka_starter_code/python simulate_optitrack.py`
+3. Run `python kuka_starter_code/simulate_optitrack.py`
 
 ### Preset Flight Mode
 ```
