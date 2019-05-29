@@ -148,7 +148,7 @@ Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target positio
 
 	// set the desired orientation matrix           
 	Quaterniond qrotation;
-	qrotation.setFromTwoVectors(Vector3d::UnitZ(), direction_vector);
+	qrotation.setFromTwoVectors(-Vector3d::UnitY(), direction_vector);
 	desired_orientation = qrotation.toRotationMatrix();
 
 	// debugging statements
@@ -334,8 +334,8 @@ int main() {
 			redis_client.getEigenMatrixDerivedString(OPTITRACK_RIGID_BODY_POSITION_KEY, optitrack_rigid_positions);
 			target_optitrack_position = optitrack_rigid_positions.row(OPTITRACK_RIGIDBODY_TARGET_INDEX);
 
+			// convert optitrack timestamp (string) to seconds (double)
 			string optitrack_timestamp_string = redis_client.get(OPTITRACK_TIMESTAMP_KEY);
-			// TODO: Convert Optitrack timestamp (string) to seconds (double).
 			optitrack_time = std::stod(optitrack_timestamp_string);
 		}
 
@@ -404,7 +404,6 @@ int main() {
 				// get the estimated velocity and acceleration from position and time data.
 				Vector3d estimate_target_robot_velocity = estimateTargetRobotVelocity(current_target_robot_position, target_robot_position, delta_time);
 				Vector3d estimate_target_robot_acceleration = estimateTargetRobotAcceleration(estimate_target_robot_velocity, target_robot_velocity, delta_time);
-				// cout << estimate_target_robot_velocity.norm() << endl;
 
 				// predict target position in a timestep
 				Vector3d predicted_target_robot_position = predictedTargetRobotPosition(current_target_robot_position, estimate_target_robot_velocity, estimate_target_robot_acceleration, delta_time);
@@ -431,7 +430,7 @@ int main() {
 		// detect joint and torque limits
 		// command_torques << 170, 170, 170, -170, -50, -100, -110;
 		// robot->_q  << 180.0/180.0*M_PI, 140.0/180.0*M_PI, -170.0/180.0*M_PI, 100.0/180.0*M_PI, 165.0/180.0*M_PI, 120.0/180.0*M_PI, -180.0/180.0*M_PI;
-		for (int i = 0; i < 7; i++) {
+		for (int i = 0; i < dof; i++) {
 			double torque_i = command_torques(i);
 			if (abs(torque_i) > torque_limit[i]) {
 				cout << "[WARNING] Joint: " << i << endl;

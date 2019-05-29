@@ -6,11 +6,13 @@ add_definitions(${SAI2-PRIMITIVES_DEFINITIONS})
 # create an executable
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CS225A_BINARY_DIR}/kuka_starter_code)
 ADD_EXECUTABLE (controller_kuka controller.cpp ${CS225A_COMMON_SOURCE})
+ADD_EXECUTABLE (ori_controller_kuka ori_controller.cpp ${CS225A_COMMON_SOURCE})
 ADD_EXECUTABLE (2dof_controller_kuka 2dof_controller.cpp ${CS225A_COMMON_SOURCE})
 ADD_EXECUTABLE (simviz_kuka simviz.cpp ${CS225A_COMMON_SOURCE})
 
 # and link the library against the executable
 TARGET_LINK_LIBRARIES (controller_kuka ${CS225A_COMMON_LIBRARIES} ${SAI2-PRIMITIVES_LIBRARIES})
+TARGET_LINK_LIBRARIES (ori_controller_kuka ${CS225A_COMMON_LIBRARIES} ${SAI2-PRIMITIVES_LIBRARIES})
 TARGET_LINK_LIBRARIES (2dof_controller_kuka ${CS225A_COMMON_LIBRARIES} ${SAI2-PRIMITIVES_LIBRARIES})
 TARGET_LINK_LIBRARIES (simviz_kuka ${CS225A_COMMON_LIBRARIES} ${SAI2-PRIMITIVES_LIBRARIES})
 

@@ -23,7 +23,7 @@ using namespace Eigen;
 const string robot_file = "./resources/kuka_iiwa.urdf";
 
 #define JOINT_CONTROLLER              0
-#define TASK_CONTROLLER               1
+#define ORI_CONTROLLER                1
 
 #define OPTITRACK_RIGIDBODY_ROBOTBASE_INDEX       0    // index for the robot base rigid body 
 #define OPTITRACK_RIGIDBODY_TARGET_INDEX          1    // index for the target rigid body 
@@ -148,7 +148,7 @@ Matrix3d getDesiredOrientation(Vector3d target_robot_position, // target positio
 
 	// set the desired orientation matrix           
 	Quaterniond qrotation;
-	qrotation.setFromTwoVectors(Vector3d::UnitZ(), direction_vector);
+	qrotation.setFromTwoVectors(-Vector3d::UnitY(), direction_vector);
 	desired_orientation = qrotation.toRotationMatrix();
 
 	// debugging statements
@@ -242,43 +242,32 @@ int main() {
 	// DRONE TASK
 	//------------------------------------------------------------------------------
 
-	// drone 3d coordinates (robot frame)
+	// drone (robot frame)
 	Vector3d target_robot_position = Vector3d::Zero();
 	Vector3d target_robot_velocity = Vector3d::Zero();
-
-	// drone 3d coordinates (ee frame)
-	Vector3d target_ee_position = Vector3d::Zero();
-
-	// drone 2dof coordinates (ee frame)
-	Vector2d drone_2dof_position = Vector2d::Zero();
-	Vector2d drone_2dof_position_desired = Vector2d::Zero();
-	Vector2d drone_2dof_velocity = Vector2d::Zero();
+	Vector3d ee_robot_position = Vector3d::Zero();
 
 	//------------------------------------------------------------------------------
-	// DRONE TASK
+	// POSE TASK
 	//------------------------------------------------------------------------------
 
 	// pose task
 	const string control_link = "link6";
 	const Vector3d control_point = Vector3d(0,0,0.07);
-	Vector3d ee_robot_position = Vector3d::Zero();
+	auto ori_task = new Sai2Primitives::OrientationTask(robot, control_link, control_point);
 
-	// task jacobian
-	Eigen::MatrixXd J0 = MatrixXd::Zero(6,dof);
-
-	// rotation matrices
-	Eigen::Matrix3d R_ee = Matrix3d::Zero();
-	Eigen::MatrixXd R = MatrixXd::Zero(6,6);
-
-	// transformation matrices
-	Eigen::Affine3d T0_ee = Affine3d::Identity(); // transform from base to end-effector
-	Eigen::MatrixXd H = MatrixXd::Zero(2,6);	  
-
-	// controller matrices
-	Eigen::MatrixXd Jtilde = MatrixXd::Zero(2,dof);
-	Eigen::MatrixXd Jbar = MatrixXd::Zero(dof,2);  // Note: Only Sai2Model uses internally.
-	Eigen::MatrixXd Lambda = MatrixXd::Zero(2,2); 
-	Eigen::MatrixXd N = MatrixXd::Zero(dof,dof); 
+	// use online trjaectory generation
+#ifdef USING_OTG
+	ori_task->_use_interpolation_flag = false;
+#else
+	ori_task->_use_velocity_saturation_flag = false;
+#endif
+	ori_task->_saturation_velocity = M_PI; 		// pi radians in one second.
+	
+	// set the gains on the pose task
+	VectorXd ori_task_torques = VectorXd::Zero(dof);
+	ori_task->_kp = 200.0;
+	ori_task->_kv = 20.0;
 
 	//------------------------------------------------------------------------------
 	// JOINT TASK
@@ -383,20 +372,21 @@ int main() {
 			string running_string = redis_client.get(CONTROLLER_RUNING_KEY);
 			if ( running_string == "1" )
 			{
+				ori_task->reInitializeTask();
 				joint_task->reInitializeTask();
 				joint_task->_kp = 0;
 
-				state = TASK_CONTROLLER;
+				state = ORI_CONTROLLER;
 			}
 		}
 
-		else if(state == TASK_CONTROLLER)
+		else if(state == ORI_CONTROLLER)
 		{
-			// update robot values
-			robot->position(ee_robot_position, control_link, control_point);
-			robot->J(J0, control_link, control_point);
-			robot->rotation(R_ee, control_link);
-			robot->transform(T0_ee, control_link);
+			// update task model and set hierarchy
+			N_prec.setIdentity();
+			ori_task->updateTaskModel(N_prec);
+			N_prec = ori_task->_N;
+			joint_task->updateTaskModel(N_prec);
 
 			// choose a target position
 			Vector3d current_target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
@@ -413,7 +403,8 @@ int main() {
 				Vector3d predicted_target_robot_position = predictedTargetRobotPosition(current_target_robot_position, estimate_target_robot_velocity, estimate_target_robot_acceleration, delta_time);
 
 				// set the desired orientation of the pose task
-				// posori_task->_desired_orientation = getDesiredOrientation(predicted_target_robot_position, ee_robot_position);
+				robot->position(ee_robot_position, control_link, control_point);
+				ori_task->_desired_orientation = getDesiredOrientation(predicted_target_robot_position, ee_robot_position);
 
 				// update target position and (estimated) velocity
 				target_robot_position = current_target_robot_position;
@@ -423,48 +414,11 @@ int main() {
 				optitrack_prev_time = optitrack_time;
 			} 
 
-			// ------- CONTROLLER EQNS -------
+			// compute torques
+			ori_task->computeTorques(ori_task_torques);
+			joint_task->computeTorques(joint_task_torques);
 
-			// compute R
-			MatrixXd zero_3d = MatrixXd::Zero(3,3);
-			R << R_ee, zero_3d, // [[R_ee, 0]
-				 zero_3d, R_ee; //  [0, R_ee]]
-
-			// compute drone coordinates in ee_frame
-			target_ee_position = T0_ee * target_robot_position; 
-			double drone_x_ee = target_ee_position(0);
-			double drone_y_ee = target_ee_position(1);
-			double drone_z_ee = target_ee_position(2);
-
-			// compute H
-			H << 1, 0, 0, 0, -drone_z_ee, drone_y_ee,
-			     0, 0, 1, -drone_y_ee, drone_x_ee, 0;
-
-			// compute J_tilde
-			Jtilde = H * R * J0;
-
-			// compute LAMBDA, JBAR, N
-			robot->operationalSpaceMatrices(Lambda, Jbar, N, Jtilde);
-
-			// set the gains
-			double kp = 100.0; 
-			double kv = 20.0;
-			double kpj = 100.0;
-			double kvj = 50.0;
-
-			// set the drone actual and desired position
-			drone_2dof_position << drone_x_ee, drone_z_ee;
-			drone_2dof_position_desired << 0.0, 0.0;
-			drone_2dof_velocity = Jtilde * robot->_dq;
-
-			// ==> F = (2 x 2) * (2 x 1) = (2 x 1)
-			MatrixXd F = Lambda * (-kp * (drone_2dof_position - drone_2dof_position_desired)- kv * drone_2dof_velocity);
-
-			// ==> damping = (dof x dof) x (dof x 1) = (dof x 1)
-			MatrixXd damping = robot->_M * (-kpj * (robot->_q - q_init_desired) - kvj * robot->_dq);
-
-			// ==> torques = (dof x 2) x (2 x 1) + (dof x dof) x (dof x 1) = (dof x 1)
-			command_torques = Jtilde.transpose() * F +  N.transpose() * damping;
+			command_torques = ori_task_torques + joint_task_torques;
 		}
 
 		// detect joint and torque limits
