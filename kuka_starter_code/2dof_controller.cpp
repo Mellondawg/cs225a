@@ -221,6 +221,7 @@ int main() {
 	// prepare controller
 	int dof = robot->dof();
 	VectorXd command_torques = VectorXd::Zero(dof);
+	VectorXd gravity = VectorXd::Zero(dof);
 	MatrixXd N_prec = MatrixXd::Identity(dof, dof);
 
 	// joint and torque limits
@@ -236,23 +237,23 @@ int main() {
 
 	// optitrack positions
 	Vector3d robotbase_optitrack_position = Vector3d::Zero(); // robot base position (optitrack frame)
-	Vector3d target_optitrack_position = Vector3d::Zero();    // drone position (optitrack frame)
+	Vector3d target_optitrack_position = Vector3d::Zero();    // target position (optitrack frame)
 
 	//------------------------------------------------------------------------------
 	// DRONE TASK
 	//------------------------------------------------------------------------------
 
-	// drone 3d coordinates (robot frame)
+	// target 3d coordinates (robot frame)
 	Vector3d target_robot_position = Vector3d::Zero();
 	Vector3d target_robot_velocity = Vector3d::Zero();
 
-	// drone 3d coordinates (ee frame)
+	// target 3d coordinates (ee frame)
 	Vector3d target_ee_position = Vector3d::Zero();
 
-	// drone 2dof coordinates (ee frame)
-	Vector2d drone_2dof_position = Vector2d::Zero();
-	Vector2d drone_2dof_position_desired = Vector2d::Zero();
-	Vector2d drone_2dof_velocity = Vector2d::Zero();
+	// target 2dof coordinates (ee frame)
+	Vector2d target_2dof_position = Vector2d::Zero();
+	Vector2d target_2dof_position_desired = Vector2d::Zero();
+	Vector2d target_2dof_velocity = Vector2d::Zero();
 
 	//------------------------------------------------------------------------------
 	// DRONE TASK
@@ -267,7 +268,7 @@ int main() {
 	Eigen::MatrixXd J0 = MatrixXd::Zero(6,dof);
 
 	// rotation matrices
-	Eigen::Matrix3d R_ee = Matrix3d::Zero();
+	Eigen::Matrix3d R0_ee = Matrix3d::Zero();
 	Eigen::MatrixXd R = MatrixXd::Zero(6,6);
 
 	// transformation matrices
@@ -395,7 +396,8 @@ int main() {
 			// update robot values
 			robot->position(ee_robot_position, control_link, control_point);
 			robot->transform(T0_ee, control_link, control_point);
-			robot->rotation(R_ee, control_link);
+			robot->rotation(R0_ee, control_link);
+			robot->gravityVector(gravity);  // joint gravity vector
 			robot->J(J0, control_link, control_point);
 
 			// choose a target position
@@ -427,45 +429,50 @@ int main() {
 
 			// compute R
 			MatrixXd zero_3d = MatrixXd::Zero(3,3);
-			R << R_ee, zero_3d, // [[R_ee, 0]
-				 zero_3d, R_ee; //  [0, R_ee]]
+			R << R0_ee.transpose(), zero_3d, // [[R0_ee, 0]
+				 zero_3d, R0_ee.transpose(); //  [0, R0_ee]]
 
-			// compute drone coordinates in ee_frame
-			// cout << T0_ee.inverse() * ee_robot_position << endl;  	// should equal (0, 0, 0)
+			// compute target coordinates in ee_frame
 			target_ee_position = T0_ee.inverse() * target_robot_position; 
-			double drone_x_ee = target_ee_position(0);
-			double drone_y_ee = target_ee_position(1);
-			double drone_z_ee = target_ee_position(2);
+			double target_ee_x = target_ee_position(0);
+			double target_ee_y = target_ee_position(1);
+			double target_ee_z = target_ee_position(2);
+			//cout << T0_ee.linear().inverse() * (ee_robot_position - T0_ee.translation()) << endl;  	// should equal (0, 0, 0)
+			//cout << target_ee_position << endl;  	// should equal (0, 0, 0)
 
 			// compute H
-			H << 1, 0, 0, 0, -drone_z_ee, drone_y_ee,
-			     0, 0, 1, -drone_y_ee, drone_x_ee, 0;
+			H << 1, 0, 0, 0, -target_ee_z, target_ee_y,
+			     0, 0, 1, -target_ee_y, target_ee_x, 0;
 
 			// compute Jtilde
-			Jtilde = H * R.tranpose() * J0; // (2 x dof) = (2, 6) x (6, 6) x (6 x dof)
+			Jtilde = H * R * J0;  // (2 x dof) = (2, 6) x (6, 6) x (6 x dof)
 
 			// compute Lambda, Jbar, N from Jtilde
 			robot->operationalSpaceMatrices(Lambda, Jbar, N, Jtilde);
 
 			// set the gains
-			double kp = 1.0;
-			double kv = 5.0;
-			double kpj = 100.0;
-			double kvj = 50.0;
+			double kp = 50.0;
+			double kv = 25.0;
+			// double kpj = 100.0;
+			// double kvj = 50.0;
 
-			// set the drone actual and desired position
-			drone_2dof_position << drone_x_ee, drone_z_ee;
-			drone_2dof_position_desired << 0.0, 0.0;
-			drone_2dof_velocity = Jtilde * robot->_dq;
+			// set the target actual and desired position
+			target_2dof_position << target_ee_x, target_ee_z;
+			target_2dof_position_desired << 0.0, 0.0;
+			target_2dof_velocity = Jtilde * robot->_dq;
 
 			// ==> F = (2 x 2) * (2 x 1) = (2 x 1)
-			MatrixXd F = Lambda * (-kp * (drone_2dof_position - drone_2dof_position_desired)- kv * drone_2dof_velocity);
+			MatrixXd F = Lambda * (-kp * (target_2dof_position - target_2dof_position_desired) - kv * target_2dof_velocity);
 
 			// ==> damping = (dof x dof) x (dof x 1) = (dof x 1)
-			MatrixXd damping = robot->_M * (-kpj * (robot->_q - q_init_desired) - kvj * robot->_dq);
+			// MatrixXd damping = robot->_M * (-kpj * (robot->_q - q_init_desired) - kvj * robot->_dq);
+
+
+			joint_task->updateTaskModel(N);
+			joint_task->computeTorques(joint_task_torques);
 
 			// ==> torques = (dof x 2) x (2 x 1) + (dof x dof) x (dof x 1) = (dof x 1)
-			command_torques = Jtilde.transpose() * F +  N.transpose() * damping;
+			command_torques = Jtilde.transpose() * F + joint_task_torques; // N.transpose() * damping;
 		}
 
 		// detect joint and torque limits
