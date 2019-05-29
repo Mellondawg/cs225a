@@ -394,9 +394,9 @@ int main() {
 		{
 			// update robot values
 			robot->position(ee_robot_position, control_link, control_point);
-			robot->J(J0, control_link, control_point);
+			robot->transform(T0_ee, control_link, control_point);
 			robot->rotation(R_ee, control_link);
-			robot->transform(T0_ee, control_link);
+			robot->J(J0, control_link, control_point);
 
 			// choose a target position
 			Vector3d current_target_robot_position = getTargetRobotPosition(target_optitrack_position, robotbase_optitrack_position); 
@@ -431,7 +431,8 @@ int main() {
 				 zero_3d, R_ee; //  [0, R_ee]]
 
 			// compute drone coordinates in ee_frame
-			target_ee_position = T0_ee * target_robot_position; 
+			// cout << T0_ee.inverse() * ee_robot_position << endl;  	// should equal (0, 0, 0)
+			target_ee_position = T0_ee.inverse() * target_robot_position; 
 			double drone_x_ee = target_ee_position(0);
 			double drone_y_ee = target_ee_position(1);
 			double drone_z_ee = target_ee_position(2);
@@ -440,15 +441,15 @@ int main() {
 			H << 1, 0, 0, 0, -drone_z_ee, drone_y_ee,
 			     0, 0, 1, -drone_y_ee, drone_x_ee, 0;
 
-			// compute J_tilde
-			Jtilde = H * R * J0;
+			// compute Jtilde
+			Jtilde = H * R.tranpose() * J0; // (2 x dof) = (2, 6) x (6, 6) x (6 x dof)
 
-			// compute LAMBDA, JBAR, N
+			// compute Lambda, Jbar, N from Jtilde
 			robot->operationalSpaceMatrices(Lambda, Jbar, N, Jtilde);
 
 			// set the gains
-			double kp = 100.0; 
-			double kv = 20.0;
+			double kp = 1.0;
+			double kv = 5.0;
 			double kpj = 100.0;
 			double kvj = 50.0;
 
