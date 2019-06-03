@@ -182,14 +182,14 @@ int main() {
 	}
 	else
 	{
-		JOINT_ANGLES_KEY  = "sai2::FrankaPanda::sensors::q";
-		JOINT_VELOCITIES_KEY = "sai2::FrankaPanda::sensors::dq";
-		JOINT_TORQUES_COMMANDED_KEY = "sai2::FrankaPanda::actuators::fgc";
-		JOINT_TORQUES_SENSED_KEY = "sai2::FrankaPanda::sensors::torques";
-		
-		MASSMATRIX_KEY = "sai2::FrankaPanda::sensors::model::massmatrix";
-		CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
-		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";
+		JOINT_TORQUES_COMMANDED_KEY = "sai2::KUKA_IIWA::actuators::fgc";
+		JOINT_ANGLES_KEY  = "sai2::KUKA_IIWA::sensors::q";
+		JOINT_VELOCITIES_KEY = "sai2::KUKA_IIWA::sensors::dq";
+
+		JOINT_TORQUES_SENSED_KEY = "sai2::KUKA_IIWA::sensors::torques";
+		MASSMATRIX_KEY = "sai2::KUKA_IIWA::model::massmatrix";
+		// CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
+		// ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";
 	}
 	
 	OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";

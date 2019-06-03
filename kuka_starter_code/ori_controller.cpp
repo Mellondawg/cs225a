@@ -58,7 +58,7 @@ std::string CONTROLLER_RUNING_KEY;
 // CONTROLLER SETTINGS 
 //------------------------------------------------------------------------------
 
-const bool flag_simulation = true;
+const bool flag_simulation = false;
 const bool use_optitrack = true; // whether to use optitrack values from redis.
 const bool inertia_regularization = true;
 
@@ -86,7 +86,7 @@ Vector3d getTargetRobotPosition(Vector3d target_optitrack_position,
 	double relative_optitrack_z = relative_optitrack_position(2);
 
 	// rotate optitrack axes into robot axes.
-	target_robot_position << -relative_optitrack_z, -relative_optitrack_x, relative_optitrack_y;
+	target_robot_position << -relative_optitrack_z, -relative_optitrack_x, relative_optitrack_y - 0.015;
 	return target_robot_position;
 }
 
@@ -182,14 +182,14 @@ int main() {
 	}
 	else
 	{
-		JOINT_ANGLES_KEY  = "sai2::FrankaPanda::sensors::q";
-		JOINT_VELOCITIES_KEY = "sai2::FrankaPanda::sensors::dq";
-		JOINT_TORQUES_COMMANDED_KEY = "sai2::FrankaPanda::actuators::fgc";
-		JOINT_TORQUES_SENSED_KEY = "sai2::FrankaPanda::sensors::torques";
-		
-		MASSMATRIX_KEY = "sai2::FrankaPanda::sensors::model::massmatrix";
-		CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
-		ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";
+		JOINT_TORQUES_COMMANDED_KEY = "sai2::KUKA_IIWA::actuators::fgc";
+		JOINT_ANGLES_KEY  = "sai2::KUKA_IIWA::sensors::q";
+		JOINT_VELOCITIES_KEY = "sai2::KUKA_IIWA::sensors::dq";
+
+		JOINT_TORQUES_SENSED_KEY = "sai2::KUKA_IIWA::sensors::torques";
+		MASSMATRIX_KEY = "sai2::KUKA_IIWA::model::massmatrix";
+		// CORIOLIS_KEY = "sai2::FrankaPanda::sensors::model::coriolis";
+		// ROBOT_GRAVITY_KEY = "sai2::FrankaPanda::sensors::model::robot_gravity";
 	}
 	
 	OPTITRACK_TIMESTAMP_KEY = "sai2::optitrack::timestamp";
@@ -257,11 +257,14 @@ int main() {
 	auto ori_task = new Sai2Primitives::OrientationTask(robot, control_link, control_point);
 
 	// use online trjaectory generation
-#ifdef USING_OTG
-	ori_task->_use_interpolation_flag = false;
-#else
-	ori_task->_use_velocity_saturation_flag = false;
-#endif
+// #ifdef USING_OTG
+	ori_task->_use_interpolation_flag = true;
+	ori_task->_otg->setMaxVelocity(M_PI);
+	ori_task->_otg->setMaxAcceleration(3*M_PI);
+	ori_task->_otg->setMaxJerk(9*M_PI);
+// #else
+	// ori_task->_use_velocity_saturation_flag = true;
+// #endif
 	ori_task->_saturation_velocity = M_PI; 		// pi radians in one second.
 	
 	// set the gains on the pose task
@@ -275,11 +278,11 @@ int main() {
 
 	auto joint_task = new Sai2Primitives::JointTask(robot);
 
-#ifdef USING_OTG
+// #ifdef USING_OTG
 	joint_task->_use_interpolation_flag = true;
-#else
-	joint_task->_use_velocity_saturation_flag = true;
-#endif
+// #else
+	// joint_task->_use_velocity_saturation_flag = true;
+// #endif
 
 	// set the gains on the joint task
 	VectorXd joint_task_torques = VectorXd::Zero(dof);
@@ -288,7 +291,7 @@ int main() {
 
 	// set the initial (default) desired position of the joint task
 	VectorXd q_init_desired = initial_q;
-	q_init_desired << 90.0, -90.0, 0.0, -90.0, 0.0, 0.0, 0.0;
+	q_init_desired << 0.0, -70.0, 0.0, -70.0, 90.0, -70.0, 0.0;
 	q_init_desired *= M_PI/180.0;
 	joint_task->_desired_position = q_init_desired;
 
@@ -403,7 +406,8 @@ int main() {
 				Vector3d predicted_target_robot_position = predictedTargetRobotPosition(current_target_robot_position, estimate_target_robot_velocity, estimate_target_robot_acceleration, delta_time);
 
 				// set the desired orientation of the pose task
-				robot->position(ee_robot_position, control_link, control_point);
+				const Vector3d laser_control_point = Vector3d(0,0,-0.02);
+				robot->position(ee_robot_position, control_link, laser_control_point);
 				ori_task->_desired_orientation = getDesiredOrientation(predicted_target_robot_position, ee_robot_position);
 
 				// update target position and (estimated) velocity
@@ -439,6 +443,9 @@ int main() {
 				cout << "[ERROR] Angle (Limit): " << joint_limit[i] << endl;	
 			}
 		}
+
+		// cout << joint_task->_desired_position  << endl;
+		// cout << "=====" << endl;
 
 		// send torques to redis.
 		redis_client.setEigenMatrixJSON(JOINT_TORQUES_COMMANDED_KEY, command_torques);
